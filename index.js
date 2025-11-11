@@ -118,7 +118,7 @@ function assembleVideoFromFrames(framesPattern, fps, outputPath, promptText, dur
 }
 
 // API endpoint
-app.post("/aniedit", upload.single("image"), async (req, res) => {
+app.post("/editvideo", upload.single("image"), async (req, res) => {
   try {
     const { image_url, prompt } = req.body;
     let duration = parseFloat(req.body.duration || "5");
