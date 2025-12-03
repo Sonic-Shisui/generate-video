@@ -1,159 +1,125 @@
-const express = require("express");
-const multer = require("multer");
-const axios = require("axios");
-const fs = require("fs");
-const path = require("path");
-const sharp = require("sharp");
-const ffmpeg = require("fluent-ffmpeg");
-const { v4: uuidv4 } = require("uuid");
-const cors = require("cors");
-const os = require("os");
+const express = require('express');
+const axios = require('axios');
 
 const app = express();
-app.use(express.json({ limit: "15mb" }));
-app.use(express.urlencoded({ extended: true }));
-app.use(cors());
+app.use(express.json({ limit: '20mb' })); 
 
-// dossiers pour vidéos et fichiers temporaires
-const PUBLIC_DIR = path.join(__dirname, "public");
-const VIDEO_DIR = path.join(PUBLIC_DIR, "videos");
-const TMP_DIR = path.join(os.tmpdir(), "aniedit_tmp");
-
-[PUBLIC_DIR, VIDEO_DIR, TMP_DIR].forEach(dir => {
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-});
-
-const upload = multer({ dest: path.join(TMP_DIR, "uploads/") });
-
-// helper : télécharger une image depuis une URL
-async function downloadImageToFile(url, outPath) {
-  const writer = fs.createWriteStream(outPath);
-  const response = await axios.get(url, { responseType: "stream", timeout: 30000 });
-  return new Promise((resolve, reject) => {
-    response.data.pipe(writer);
-    let error = null;
-    writer.on("error", err => { error = err; writer.close(); reject(err); });
-    writer.on("close", () => { if (!error) resolve(outPath); });
-  });
+const OPENAI_KEY = "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";
+if (!OPENAI_KEY) {
+  console.warn('⚠️ Warning: OPENAI_API_KEY not set in environment variables.');
 }
+app.get('/', (req, res) => res.send('AniEdit API (OpenAI Sora) — up'));
 
-// helper : créer des frames depuis une image
-async function createFramesFromImage(imgPath, framesDir, frameCount, width = 720, height = 720) {
-  if (!fs.existsSync(framesDir)) fs.mkdirSync(framesDir, { recursive: true });
-
-  const metadata = await sharp(imgPath).metadata();
-
-  for (let i = 0; i < frameCount; i++) {
-    const zoom = 1 + 0.02 * Math.sin((i / frameCount) * Math.PI * 2);
-    const offsetX = Math.round(((i / (frameCount - 1)) - 0.5) * metadata.width * 0.06);
-    const offsetY = Math.round(((i / (frameCount - 1)) - 0.5) * metadata.height * 0.03);
-
-    const cropW = Math.round(metadata.width / zoom);
-    const cropH = Math.round(metadata.height / zoom);
-    const left = Math.max(0, Math.min(metadata.width - cropW, Math.floor((metadata.width - cropW) / 2 + offsetX)));
-    const top = Math.max(0, Math.min(metadata.height - cropH, Math.floor((metadata.height - cropH) / 2 + offsetY)));
-
-    const hueShift = Math.round(5 * Math.sin((i / frameCount) * Math.PI * 2));
-
-    const outFile = path.join(framesDir, `frame_${String(i).padStart(4, "0")}.png`);
-    await sharp(imgPath)
-      .extract({ left, top, width: cropW, height: cropH })
-      .resize(width, height)
-      .modulate({ hue: hueShift + 0, saturation: 1 + 0.02 * Math.cos((i / frameCount) * Math.PI * 2) })
-      .toFile(outFile);
-  }
-}
-
-// helper : assembler les frames en mp4
-function assembleVideoFromFrames(framesPattern, fps, outputPath, promptText, duration) {
-  return new Promise((resolve, reject) => {
-    const fontfile = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf";
-    const hasFont = fs.existsSync(fontfile);
-
-    let command = ffmpeg()
-      .addInput(framesPattern)
-      .inputOptions([`-framerate ${fps}`])
-      .outputOptions([
-        `-c:v libx264`,
-        `-pix_fmt yuv420p`,
-        `-vf format=yuv420p`,
-        `-movflags +faststart`,
-        `-preset veryfast`,
-      ])
-      .duration(duration)
-      .on("error", err => reject(err))
-      .on("end", () => resolve(outputPath));
-
-    if (promptText && promptText.trim().length > 0) {
-      const safePrompt = promptText.replace(/[:'"]/g, "");
-      const drawText = hasFont
-        ? `drawtext=fontfile=${fontfile}:text='${safePrompt}':fontcolor=white@0.9:fontsize=28:box=1:boxcolor=0x00000099:boxborderw=5:x=(w-text_w)/2:y=h-(text_h*2)`
-        : `drawtext=text='${safePrompt}':fontcolor=white@0.9:fontsize=28:box=1:boxcolor=0x00000099:boxborderw=5:x=(w-text_w)/2:y=h-(text_h*2)`;
-      command = command.videoFilters(drawText);
-    }
-
-    command.save(outputPath);
-  });
-}
-
-// endpoint principal
-app.post("/aniedit", upload.single("image"), async (req, res) => {
+/**
+ * Endpoint /aniedit
+ * Query params or JSON body:
+ *  - image_url (string)  <-- optional but recommended (we reference it in the prompt)
+ *  - prompt (string)     <-- required
+ *  - duration (int)      <-- seconds (optional, default 5)
+ *
+ * Returns a JSON { status: 'processing'|'failed'|'done', video_url?: string, job?: ... }
+ *
+ * NOTE: the exact OpenAI video API parameters can evolve. Here we call POST /v1/videos
+ * with model "sora-2" (adjust to available model in your account).
+ */
+app.post('/aniedit', async (req, res) => {
   try {
-    const { image_url, prompt } = req.body;
-    let duration = parseFloat(req.body.duration || "5");
-    if (isNaN(duration) || duration <= 0) duration = 5;
-    if (duration > 30) duration = 30;
+    const image_url = req.body.image_url || req.query.image_url;
+    const promptRaw = req.body.prompt || req.query.prompt;
+    const duration = parseInt(req.body.duration || req.query.duration || '5', 10);
 
-    const id = uuidv4();
-    const tmpDir = path.join(TMP_DIR, id);
-    fs.mkdirSync(tmpDir, { recursive: true });
-
-    const inputImagePath = path.join(tmpDir, "input_image");
-    if (req.file) {
-      fs.renameSync(req.file.path, inputImagePath + path.extname(req.file.originalname || ".png"));
-    } else if (image_url) {
-      const ext = path.extname(new URL(image_url).pathname) || ".jpg";
-      const dest = inputImagePath + ext;
-      await downloadImageToFile(image_url, dest);
-    } else {
-      return res.status(400).json({ status: false, message: "image_url or uploaded image required" });
+    if (!promptRaw || promptRaw.trim().length === 0) {
+      return res.status(400).json({ status: 'error', message: 'Missing prompt parameter.' });
     }
 
-    const savedImage = fs.readdirSync(tmpDir).find(f => f.startsWith("input_image"));
-    if (!savedImage) throw new Error("Failed to save input image.");
-    const savedImagePath = path.join(tmpDir, savedImage);
+    // Build prompt for Sora — include the image URL as a reference inside the prompt text
+    // (Sora supports image inputs; depending on your account you may prefer multipart upload)
+    const prompt = image_url
+      ? `Animate the subject in this photo: ${image_url}\nInstructions: ${promptRaw}\nDuration: ${duration}s`
+      : `Generate a short ${duration}s video: ${promptRaw}`;
 
-    const fps = 25;
-    const frameCount = Math.max(1, Math.round(duration * fps));
-    const framesDir = path.join(tmpDir, "frames");
-    await createFramesFromImage(savedImagePath, framesDir, frameCount, 720, 720);
+    // Prepare payload for OpenAI video endpoint
+    const openaiPayload = {
+      model: 'sora-2',            // change if your account uses another model (e.g., sora-2-pro)
+      prompt: prompt,
+      // optional: resolution, fps, format. Keep them if you want defaults.
+      // resolution: '720x1280',
+      // duration_seconds: duration,
+      // NOTE: parameter names may vary between OpenAI releases. If your account requires other keys,
+      // check https://platform.openai.com/docs/guides/video-generation.
+    };
 
-    const framesPattern = path.join(framesDir, "frame_%04d.png");
-    const outVideoPath = path.join(VIDEO_DIR, `${id}.mp4`);
+    // Create generation job
+    const createResp = await axios.post(
+      'https://api.openai.com/v1/videos',
+      openaiPayload,
+      {
+        headers: {
+          'Authorization': `Bearer ${OPENAI_KEY}`,
+          'Content-Type': 'application/json'
+        },
+        timeout: 120000
+      }
+    );
 
-    await assembleVideoFromFrames(framesPattern, fps, outVideoPath, prompt || "", duration);
+    // Many video endpoints return either a direct video_url or an async job id.
+    // We try to return what we get back to the caller.
+    const createData = createResp.data || {};
+    // If API returns video_url directly:
+    if (createData.video_url) {
+      return res.json({
+        status: 'done',
+        video_url: createData.video_url,
+        meta: createData
+      });
+    }
 
-    setTimeout(() => {
-      try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (e) {}
-    }, 10 * 1000);
+    // If API returns an id/job, return it and instruct caller to poll
+    if (createData.id || createData.job) {
+      return res.json({
+        status: 'processing',
+        job: createData,
+        message: 'Video generation started. Poll /aniedit/status?job_id=... to get result'
+      });
+    }
 
-    const videoUrl = `${req.protocol}://${req.get("host")}/videos/${id}.mp4`;
-    return res.json({ status: true, message: "Video generated", video_url: videoUrl, id });
+    // Otherwise return raw response for debugging
+    return res.json({ status: 'unknown', raw: createData });
+
   } catch (err) {
-    console.error("Error in /aniedit:", err);
-    return res.status(500).json({ status: false, message: err.message || "Internal error" });
+    console.error('Error calling OpenAI videos endpoint:', err?.response?.data || err.message || err);
+    const apiMsg = err?.response?.data || null;
+    return res.status(500).json({
+      status: 'failed',
+      error: apiMsg || err.message
+    });
   }
 });
 
-// servir les vidéos
-app.use("/videos", express.static(VIDEO_DIR));
+/**
+ * Optional: status poll endpoint if OpenAI returned a job id
+ * This implementation expects the OpenAI API to expose a /v1/videos/{id} or similar.
+ * If your account uses a different route, adapt accordingly.
+ */
+app.get('/aniedit/status', async (req, res) => {
+  try {
+    const jobId = req.query.job_id || req.query.id;
+    if (!jobId) return res.status(400).json({ status: 'error', message: 'Missing job_id' });
 
-// endpoint racine
-app.get("/", (req, res) => {
-  res.json({ status: true, message: "Aniedit minimal API running" });
+    const statusResp = await axios.get(`https://api.openai.com/v1/videos/${jobId}`, {
+      headers: { 'Authorization': `Bearer ${OPENAI_KEY}` },
+      timeout: 60000
+    });
+
+    return res.json({ status: 'ok', job: statusResp.data });
+  } catch (err) {
+    console.error('Status check error:', err?.response?.data || err.message || err);
+    return res.status(500).json({
+      status: 'failed',
+      error: err?.response?.data || err.message
+    });
+  }
 });
 
-const PORT = process.env.PORT || 20409;
-app.listen(PORT, () => {
-  console.log(`Aniedit server listening on port ${PORT}`);
-});
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`AniEdit API listening on ${PORT}`));
