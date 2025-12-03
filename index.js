@@ -9,9 +9,8 @@ if (!OPENAI_KEY) {
   console.warn('⚠️ Warning: OPENAI_API_KEY not set in environment variables.');
 }
 
-app.get('/', (req, res) => res.send('AniEdit API (OpenAI Sora) — up'));
+app.get('/', (req, res) => res.send('🌐AI GENERATOR VIDEO ONLINE🌐'));
 
-// ✅ GET /aniedit simple pour éviter "Cannot GET"
 app.get('/aniedit', (req, res) => {
   res.json({
     status: "ready",
