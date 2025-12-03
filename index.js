@@ -8,19 +8,23 @@ const OPENAI_KEY = "sk-proj-4wtzfNyj0jIyE_apeccTLv8QVZPBLE5Jw0pJjTr4b__OhzKeJbS5
 if (!OPENAI_KEY) {
   console.warn('⚠️ Warning: OPENAI_API_KEY not set in environment variables.');
 }
+
 app.get('/', (req, res) => res.send('AniEdit API (OpenAI Sora) — up'));
+
+// ✅ GET /aniedit simple pour éviter "Cannot GET"
+app.get('/aniedit', (req, res) => {
+  res.json({
+    status: "ready",
+    message: "Use POST /aniedit to generate a video."
+  });
+});
 
 /**
  * Endpoint /aniedit
  * Query params or JSON body:
- *  - image_url (string)  <-- optional but recommended (we reference it in the prompt)
+ *  - image_url (string)  <-- optional but recommended
  *  - prompt (string)     <-- required
  *  - duration (int)      <-- seconds (optional, default 5)
- *
- * Returns a JSON { status: 'processing'|'failed'|'done', video_url?: string, job?: ... }
- *
- * NOTE: the exact OpenAI video API parameters can evolve. Here we call POST /v1/videos
- * with model "sora-2" (adjust to available model in your account).
  */
 app.post('/aniedit', async (req, res) => {
   try {
@@ -32,24 +36,16 @@ app.post('/aniedit', async (req, res) => {
       return res.status(400).json({ status: 'error', message: 'Missing prompt parameter.' });
     }
 
-    // Build prompt for Sora — include the image URL as a reference inside the prompt text
-    // (Sora supports image inputs; depending on your account you may prefer multipart upload)
     const prompt = image_url
       ? `Animate the subject in this photo: ${image_url}\nInstructions: ${promptRaw}\nDuration: ${duration}s`
       : `Generate a short ${duration}s video: ${promptRaw}`;
 
-    // Prepare payload for OpenAI video endpoint
     const openaiPayload = {
-      model: 'sora-2',            // change if your account uses another model (e.g., sora-2-pro)
+      model: 'sora-2', 
       prompt: prompt,
-      // optional: resolution, fps, format. Keep them if you want defaults.
-      // resolution: '720x1280',
-      // duration_seconds: duration,
-      // NOTE: parameter names may vary between OpenAI releases. If your account requires other keys,
-      // check https://platform.openai.com/docs/guides/video-generation.
+      // resolution, duration_seconds, etc. peuvent être ajoutés selon besoin
     };
 
-    // Create generation job
     const createResp = await axios.post(
       'https://api.openai.com/v1/videos',
       openaiPayload,
@@ -62,10 +58,8 @@ app.post('/aniedit', async (req, res) => {
       }
     );
 
-    // Many video endpoints return either a direct video_url or an async job id.
-    // We try to return what we get back to the caller.
     const createData = createResp.data || {};
-    // If API returns video_url directly:
+
     if (createData.video_url) {
       return res.json({
         status: 'done',
@@ -74,7 +68,6 @@ app.post('/aniedit', async (req, res) => {
       });
     }
 
-    // If API returns an id/job, return it and instruct caller to poll
     if (createData.id || createData.job) {
       return res.json({
         status: 'processing',
@@ -83,7 +76,6 @@ app.post('/aniedit', async (req, res) => {
       });
     }
 
-    // Otherwise return raw response for debugging
     return res.json({ status: 'unknown', raw: createData });
 
   } catch (err) {
@@ -98,8 +90,6 @@ app.post('/aniedit', async (req, res) => {
 
 /**
  * Optional: status poll endpoint if OpenAI returned a job id
- * This implementation expects the OpenAI API to expose a /v1/videos/{id} or similar.
- * If your account uses a different route, adapt accordingly.
  */
 app.get('/aniedit/status', async (req, res) => {
   try {
