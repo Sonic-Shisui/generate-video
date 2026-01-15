@@ -1,17 +1,29 @@
 const express = require('express');
 const axios = require('axios');
 const app = express();
+
 app.use(express.json());
 
 const REPLICATE_API_TOKEN = "r8_FdL5cfS2Y1yEnUiMjyD1218SU7T6EBr3aVAGr";
+
+// Page d'accueil pour éviter le "Cannot GET /"
+app.get('/', (req, res) => {
+    res.json({ status: "online", message: "API Sonic Video en ligne 🚀", author: "Fadil & Sonic" });
+});
+
+// Route pour lancer l'animation
 app.post('/api/animate', async (req, res) => {
     const { imageUrl, prompt, key } = req.body;
+    
     if (key !== "fadil_boss_dev_uchiha") {
         return res.status(403).json({ error: "Clé API invalide" });
     }
 
+    if (!imageUrl) {
+        return res.status(400).json({ error: "URL de l'image manquante" });
+    }
+
     try {
-      
         const response = await axios.post(
             "https://api.replicate.com/v1/predictions",
             {
@@ -30,19 +42,18 @@ app.post('/api/animate', async (req, res) => {
             }
         );
 
-        const predictionId = response.data.id;
-      
         res.json({ 
             status: "processing", 
-            prediction_id: predictionId,
-            message: "La vidéo est en cours de création..." 
+            prediction_id: response.data.id,
+            message: "Génération lancée avec succès" 
         });
 
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ error: "Erreur lors du lancement de la génération" });
+        res.status(500).json({ error: "Erreur Replicate: " + (error.response?.data?.detail || error.message) });
     }
 });
+
+// Route pour vérifier l'état
 app.get('/api/check/:id', async (req, res) => {
     try {
         const response = await axios.get(
@@ -55,4 +66,4 @@ app.get('/api/check/:id', async (req, res) => {
     }
 });
 
-app.listen(3000, () => console.log("API Cyber-Video lancée sur le port 3000"));
+module.exports = app;
