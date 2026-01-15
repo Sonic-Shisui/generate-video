@@ -7,18 +7,14 @@ app.use(express.json());
 const REPLICATE_API_TOKEN = "r8_FdL5cfS2Y1yEnUiMjyD1218SU7T6EBr3aVAGr";
 
 app.get('/', (req, res) => {
-    res.json({ status: "online", message: "API generate Video en ligne 🚀", author: "ʚʆɞ Sømå Sønïč ʚʆɞ & L'Uchiha Perdu" });
+    res.json({ status: "online", message: "API Sonic Video active" });
 });
 
 app.post('/api/animate', async (req, res) => {
-    const { imageUrl, prompt, key } = req.body;
+    const { imageUrl, prompt } = req.body;
     
-    if (key !== "fadil_boss_dev_uchiha") {
-        return res.status(403).json({ error: "Clé API invalide" });
-    }
-
     if (!imageUrl) {
-        return res.status(400).json({ error: "URL de l'image manquante" });
+        return res.status(400).json({ error: "Image manquante" });
     }
 
     try {
@@ -28,6 +24,7 @@ app.post('/api/animate', async (req, res) => {
                 version: "3f0c27844a34730438ec6f27ee855428669e403d6f108f906560965d6c8b939e",
                 input: {
                     input_image: imageUrl,
+                    prompt: prompt || "animate this image",
                     video_length: "14_frames_with_svd_xt",
                     motion_bucket_id: 127
                 }
@@ -42,12 +39,11 @@ app.post('/api/animate', async (req, res) => {
 
         res.json({ 
             status: "processing", 
-            prediction_id: response.data.id,
-            message: "Génération lancée avec succès" 
+            prediction_id: response.data.id 
         });
 
     } catch (error) {
-        res.status(500).json({ error: "Erreur Replicate: " + (error.response?.data?.detail || error.message) });
+        res.status(500).json({ error: error.message });
     }
 });
 
@@ -59,7 +55,7 @@ app.get('/api/check/:id', async (req, res) => {
         );
         res.json(response.data);
     } catch (error) {
-        res.status(500).json({ error: "Erreur de vérification" });
+        res.status(500).json({ error: "ID inexistant" });
     }
 });
 
