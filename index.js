@@ -6,12 +6,10 @@ app.use(express.json());
 
 const REPLICATE_API_TOKEN = "r8_FdL5cfS2Y1yEnUiMjyD1218SU7T6EBr3aVAGr";
 
-// Page d'accueil pour éviter le "Cannot GET /"
 app.get('/', (req, res) => {
-    res.json({ status: "online", message: "API Sonic Video en ligne 🚀", author: "Fadil & Sonic" });
+    res.json({ status: "online", message: "API generate Video en ligne 🚀", author: "ʚʆɞ Sømå Sønïč ʚʆɞ & L'Uchiha Perdu" });
 });
 
-// Route pour lancer l'animation
 app.post('/api/animate', async (req, res) => {
     const { imageUrl, prompt, key } = req.body;
     
@@ -53,7 +51,6 @@ app.post('/api/animate', async (req, res) => {
     }
 });
 
-// Route pour vérifier l'état
 app.get('/api/check/:id', async (req, res) => {
     try {
         const response = await axios.get(
