@@ -1,68 +1,58 @@
-const OPENAI_KEY = "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";
+const express = require('express');
+const axios = require('axios');
+const app = express();
+app.use(express.json());
 
-export default async function handler(req, res) {
-  if (req.method === 'GET' || req.method === 'POST') {
-    try {
-      const data = req.method === 'POST' ? req.body : req.query;
-      const image_url = data.image_url;
-      const promptRaw = data.prompt;
-      const duration = parseInt(data.duration || '5', 10);
-
-      if (!promptRaw || promptRaw.trim().length === 0) {
-        return res.status(400).json({ status: 'error', message: 'Missing prompt parameter.' });
-      }
-
-      const prompt = image_url
-        ? `Animate the subject in this photo: ${image_url}\nInstructions: ${promptRaw}\nDuration: ${duration}s`
-        : `Generate a short ${duration}s video: ${promptRaw}`;
-
-      const openaiPayload = {
-        model: 'sora-2',
-        prompt: prompt
-      };
-
-      const createResp = await axios.post(
-        'https://api.openai.com/v1/videos',
-        openaiPayload,
-        {
-          headers: {
-            'Authorization': `Bearer ${OPENAI_KEY}`,
-            'Content-Type': 'application/json'
-          },
-          timeout: 120000
-        }
-      );
-
-      const createData = createResp.data || {};
-
-      if (createData.video_url) {
-        return res.status(200).json({
-          status: 'done',
-          video_url: createData.video_url,
-          meta: createData
-        });
-      }
-
-      if (createData.id || createData.job) {
-        return res.status(200).json({
-          status: 'processing',
-          job: createData,
-          message: 'Video generation started. Poll /api/aniedit/status?job_id=... to get result'
-        });
-      }
-
-      return res.status(200).json({ status: 'unknown', raw: createData });
-
-    } catch (err) {
-      console.error('Error calling OpenAI videos endpoint:', err?.response?.data || err.message || err);
-      const apiMsg = err?.response?.data || null;
-      return res.status(500).json({
-        status: 'failed',
-        error: apiMsg || err.message
-      });
+const REPLICATE_API_TOKEN = "r8_FdL5cfS2Y1yEnUiMjyD1218SU7T6EBr3aVAGr";
+app.post('/api/animate', async (req, res) => {
+    const { imageUrl, prompt, key } = req.body;
+    if (key !== "fadil_boss_dev_uchiha") {
+        return res.status(403).json({ error: "Clé API invalide" });
     }
-  } else {
-    res.setHeader('Allow', ['GET', 'POST']);
-    return res.status(405).json({ status: 'error', message: `Method ${req.method} not allowed` });
-  }
-}
+
+    try {
+      
+        const response = await axios.post(
+            "https://api.replicate.com/v1/predictions",
+            {
+                version: "3f0c27844a34730438ec6f27ee855428669e403d6f108f906560965d6c8b939e",
+                input: {
+                    input_image: imageUrl,
+                    video_length: "14_frames_with_svd_xt",
+                    motion_bucket_id: 127
+                }
+            },
+            {
+                headers: {
+                    Authorization: `Token ${REPLICATE_API_TOKEN}`,
+                    "Content-Type": "application/json",
+                }
+            }
+        );
+
+        const predictionId = response.data.id;
+      
+        res.json({ 
+            status: "processing", 
+            prediction_id: predictionId,
+            message: "La vidéo est en cours de création..." 
+        });
+
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: "Erreur lors du lancement de la génération" });
+    }
+});
+app.get('/api/check/:id', async (req, res) => {
+    try {
+        const response = await axios.get(
+            `https://api.replicate.com/v1/predictions/${req.params.id}`,
+            { headers: { Authorization: `Token ${REPLICATE_API_TOKEN}` } }
+        );
+        res.json(response.data);
+    } catch (error) {
+        res.status(500).json({ error: "Erreur de vérification" });
+    }
+});
+
+app.listen(3000, () => console.log("API Cyber-Video lancée sur le port 3000"));
