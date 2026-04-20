@@ -6,8 +6,8 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Nouveau service fiable (testé)
-const API_BASE = "https://co.wuk.sh/api/json";
+// Nouvelle API de remplacement
+const API_BASE = "https://xsaim8x-xxx-api.onrender.com/api/auto";
 
 app.get("/", (req, res) => {
     res.json({
@@ -16,35 +16,30 @@ app.get("/", (req, res) => {
             info: "/api/info?url=...",
             download: "/api/download?url=..."
         },
-        service: "co.wuk.sh"
+        service: "xsaim8x-xxx-api"
     });
 });
 
 app.get("/api/info", async (req, res) => {
     try {
         const { url } = req.query;
-        if (!url) {
-            return res.status(400).json({ success: false, error: "URL manquante" });
-        }
+        if (!url) return res.status(400).json({ success: false, error: "URL manquante" });
 
         const response = await axios.get(API_BASE, {
             params: { url },
-            timeout: 15000
+            timeout: 20000
         });
 
         const data = response.data;
-
-        if (data && data.status === "success") {
+        if (data && (data.high_quality || data.low_quality)) {
             res.json({
                 success: true,
-                title: data.title,
-                duration: data.duration,
-                thumbnail: data.thumbnail,
-                formats: data.formats || [],
-                platform: data.platform
+                title: data.title || "Sans titre",
+                high_quality: data.high_quality,
+                low_quality: data.low_quality
             });
         } else {
-            res.status(400).json({ success: false, error: data.message || "Impossible de récupérer les informations" });
+            res.status(400).json({ success: false, error: "Impossible de récupérer les informations" });
         }
     } catch (error) {
         console.error("Erreur /api/info:", error.message);
@@ -54,40 +49,21 @@ app.get("/api/info", async (req, res) => {
 
 app.get("/api/download", async (req, res) => {
     try {
-        const { url, formatId } = req.query;
-        if (!url) {
-            return res.status(400).json({ success: false, error: "URL manquante" });
-        }
+        const { url, quality } = req.query;
+        if (!url) return res.status(400).json({ success: false, error: "URL manquante" });
 
-        // Récupérer d'abord les informations pour obtenir le lien de téléchargement
-        const infoResponse = await axios.get(API_BASE, {
+        const response = await axios.get(API_BASE, {
             params: { url },
-            timeout: 15000
+            timeout: 20000
         });
 
-        const data = infoResponse.data;
-        if (!data || data.status !== "success") {
-            return res.status(400).json({ success: false, error: data.message || "Impossible d'obtenir le lien" });
-        }
-
-        // Chercher le format demandé ou le meilleur disponible
-        let downloadUrl = null;
-        if (data.formats && data.formats.length > 0) {
-            const format = formatId 
-                ? data.formats.find(f => f.format_id === formatId)
-                : data.formats[0];
-            if (format) downloadUrl = format.url;
-        }
-        
-        if (!downloadUrl) {
-            downloadUrl = data.url; // fallback
-        }
+        const data = response.data;
+        const downloadUrl = (quality === 'low' ? data.low_quality : data.high_quality) || data.high_quality || data.low_quality;
 
         if (!downloadUrl) {
             return res.status(400).json({ success: false, error: "Aucun lien de téléchargement trouvé" });
         }
 
-        // Redirection vers le lien direct
         res.redirect(downloadUrl);
     } catch (error) {
         console.error("Erreur /api/download:", error.message);
